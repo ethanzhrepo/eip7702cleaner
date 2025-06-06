@@ -70,17 +70,14 @@ var (
 )
 
 func init() {
-	// 为子命令添加标志
 	checkCmd.Flags().StringVar(&rpcURL, "rpc-url", "", "RPC URL for Ethereum node")
 	checkCmd.Flags().BoolVar(&debug, "debug", false, "Enable debug output")
 
 	clearCmd.Flags().StringVar(&rpcURL, "rpc-url", "", "RPC URL for Ethereum node")
 	clearCmd.Flags().BoolVar(&debug, "debug", false, "Enable debug output")
 
-	// 添加 gas-limit 标志
 	rootCmd.PersistentFlags().Uint64Var(&gasLimit, "gas-limit", 100000, "Gas limit for transactions")
 
-	// 添加子命令到根命令
 	rootCmd.AddCommand(checkCmd)
 	rootCmd.AddCommand(clearCmd)
 }
@@ -95,7 +92,6 @@ func main() {
 	}
 	defer term.Restore(fd, oldState)
 
-	// 监听ctrl+c, 恢复终端状态
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 	go func() {
@@ -105,7 +101,6 @@ func main() {
 		os.Exit(0)
 	}()
 
-	// Execute the command
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)

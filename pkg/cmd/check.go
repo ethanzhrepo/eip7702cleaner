@@ -38,7 +38,6 @@ type RPCResponse struct {
 
 // Check performs the check command
 func Check(address string, rpcURL string, debug bool) error {
-	// 移除强制启用调试的代码
 	// debug = true
 
 	if debug {
