@@ -93,24 +93,18 @@ func Clear(rpcURL string, gasLimit uint64) error {
 	fmt.Printf("Victim nonce: %d\n", victimNonce)
 	fmt.Printf("Relayer nonce: %d\n", relayerNonce)
 
-	// Get gas parameters
-	gasPrice, err := getGasPrice(rpcURL)
+	// Get gas parameters using EIP-1559 compatible method
+	fmt.Println("\nFetching gas parameters from the network...")
+	gasTip, gasFeeCap, err := getSuggestedGasFees(rpcURL)
 	if err != nil {
-		return fmt.Errorf("failed to get gas price: %w", err)
+		return fmt.Errorf("failed to get suggested gas fees: %w", err)
 	}
-
-	// Calculate gas parameters
-	gasTip := new(big.Int).Div(gasPrice, big.NewInt(10))   // 10% of gas price
-	gasFeeCap := new(big.Int).Mul(gasPrice, big.NewInt(2)) // 2x gas price for fee cap
 
 	// Use the provided gas limit
 	fmt.Printf("Using gas limit: %d\n", gasLimit)
 
 	// Convert Wei to Gwei for display (1 Gwei = 10^9 Wei)
 	weiToGwei := new(big.Float).SetFloat64(1000000000)
-
-	gasPriceGwei := new(big.Float).SetInt(gasPrice)
-	gasPriceGwei.Quo(gasPriceGwei, weiToGwei)
 
 	gasTipGwei := new(big.Float).SetInt(gasTip)
 	gasTipGwei.Quo(gasTipGwei, weiToGwei)
@@ -128,7 +122,6 @@ func Clear(rpcURL string, gasLimit uint64) error {
 	totalGasEth.Quo(totalGasEth, weiToEth)
 
 	fmt.Printf("\nGas Information:\n")
-	fmt.Printf("Gas price: %.6f Gwei\n", gasPriceGwei)
 	fmt.Printf("Max fee per gas: %.6f Gwei\n", gasFeeCapGwei)
 	fmt.Printf("Priority fee: %.6f Gwei\n", gasTipGwei)
 	fmt.Printf("Gas limit: %d\n", gasLimit)
@@ -497,4 +490,99 @@ func broadcastRawTx(rawTxHex string, rpcUrl string) (string, error) {
 		return "", errors.New(result.Error.Message)
 	}
 	return result.Result, nil
+}
+
+// getSuggestedGasFees queries the RPC for EIP-1559 gas fee suggestions.
+// It returns maxPriorityFeePerGas and maxFeePerGas.
+func getSuggestedGasFees(rpcURL string) (*big.Int, *big.Int, error) {
+	// 1. Try to get maxPriorityFeePerGas (the "tip")
+	priorityFeeBody := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "eth_maxPriorityFeePerGas",
+		"params":  []interface{}{},
+	}
+
+	respBody, err := makeRPCCall(rpcURL, priorityFeeBody)
+	if err != nil {
+		// Fallback for networks that don't support eth_maxPriorityFeePerGas
+		return fallbackGasFees(rpcURL)
+	}
+
+	var priorityFeeResult struct {
+		Result string `json:"result"`
+	}
+	if err := json.Unmarshal(respBody, &priorityFeeResult); err != nil || priorityFeeResult.Result == "" {
+		// Fallback for networks that don't support eth_maxPriorityFeePerGas
+		return fallbackGasFees(rpcURL)
+	}
+
+	maxPriorityFeePerGas := new(big.Int)
+	maxPriorityFeePerGas.SetString(strings.TrimPrefix(priorityFeeResult.Result, "0x"), 16)
+
+	// 2. Get the latest block to find baseFeePerGas
+	blockBody := map[string]interface{}{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "eth_getBlockByNumber",
+		"params":  []interface{}{"latest", false},
+	}
+
+	respBody, err = makeRPCCall(rpcURL, blockBody)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get latest block: %w", err)
+	}
+
+	var blockResult struct {
+		Result struct {
+			BaseFeePerGas string `json:"baseFeePerGas"`
+		} `json:"result"`
+	}
+
+	if err := json.Unmarshal(respBody, &blockResult); err != nil || blockResult.Result.BaseFeePerGas == "" {
+		// Some networks might not have baseFeePerGas, use legacy calculation
+		return fallbackGasFees(rpcURL)
+	}
+
+	baseFeePerGas := new(big.Int)
+	baseFeePerGas.SetString(strings.TrimPrefix(blockResult.Result.BaseFeePerGas, "0x"), 16)
+
+	// 3. Calculate maxFeePerGas
+	// A common strategy: maxFeePerGas = (2 * baseFee) + maxPriorityFee
+	gasFeeCap := new(big.Int).Add(
+		new(big.Int).Mul(baseFeePerGas, big.NewInt(2)),
+		maxPriorityFeePerGas,
+	)
+
+	// Ensure minimum fees for networks like BSC
+	minPriorityFee := big.NewInt(100000000) // 0.1 Gwei minimum
+	if maxPriorityFeePerGas.Cmp(minPriorityFee) < 0 {
+		maxPriorityFeePerGas = minPriorityFee
+		// Recalculate gasFeeCap with the minimum priority fee
+		gasFeeCap = new(big.Int).Add(
+			new(big.Int).Mul(baseFeePerGas, big.NewInt(2)),
+			maxPriorityFeePerGas,
+		)
+	}
+
+	return maxPriorityFeePerGas, gasFeeCap, nil
+}
+
+// fallbackGasFees provides a fallback method for networks that don't support EIP-1559
+func fallbackGasFees(rpcURL string) (*big.Int, *big.Int, error) {
+	gasPrice, err := getGasPrice(rpcURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get gas price for fallback: %w", err)
+	}
+
+	// For networks without EIP-1559, use the same value for both
+	// But ensure minimum priority fee for networks like BSC
+	minPriorityFee := big.NewInt(100000000) // 0.1 Gwei minimum
+
+	if gasPrice.Cmp(minPriorityFee) < 0 {
+		gasPrice = minPriorityFee
+	}
+
+	// In fallback mode, tip and fee cap are the same
+	return gasPrice, gasPrice, nil
 }
