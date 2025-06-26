@@ -17,9 +17,6 @@ import (
 // This will be set at build time via LDFLAGS in the Makefile
 var Version = "dev"
 
-// DefaultRPCURL is the default RPC URL if not specified
-const DefaultRPCURL = "https://ethereum-rpc.publicnode.com"
-
 // RPCRequest represents a JSON-RPC request
 type RPCRequest struct {
 	JSONRPC string        `json:"jsonrpc"`

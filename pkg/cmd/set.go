@@ -11,36 +11,41 @@ import (
 	"github.com/fatih/color"
 )
 
-// Clear performs the clear command
-func Clear(rpcURL string, gasLimit uint64) error {
+// Set performs the set command to authorize a specific contract address
+func Set(contractAddress string, rpcURL string, gasLimit uint64) error {
 	if rpcURL == "" {
 		rpcURL = DefaultRPCURL
 	}
 
-	// Explain why we need two private keys
-	fmt.Println("We will need two private keys to clear the EIP-7702 authorization:")
-	fmt.Println("")
-	fmt.Println("1. The private key of the victim address that has been maliciously authorized.")
-	fmt.Println("   This is required to sign the deauthorization transaction.")
-	fmt.Println("")
-	fmt.Println("2. The private key of a separate, secure address to pay for gas fees.")
-	fmt.Println("   This is necessary because the victim address may not have funds to pay for")
-	fmt.Println("   gas, or any funds sent to it might be immediately stolen by the attacker.")
-	fmt.Println("")
-	fmt.Println("The second address will only be used to broadcast the transaction and pay for gas.")
-	fmt.Println("It should be a secure address with a small amount of ETH for transaction fees.")
-	fmt.Println("")
-
-	// Get victim private key
-	color.Red("Please enter the private key of the address with malicious contract authorization:")
-	victimPrivateKeyHex, err := readPrivateKey()
-	if err != nil {
-		return fmt.Errorf("error reading victim private key: %w", err)
+	// Validate the contract address
+	if !common.IsHexAddress(contractAddress) {
+		return fmt.Errorf("invalid contract address format: %s", contractAddress)
 	}
 
-	victimPrivateKey, err := crypto.HexToECDSA(strings.TrimPrefix(victimPrivateKeyHex, "0x"))
+	templateAddress := common.HexToAddress(contractAddress)
+
+	// Explain why we need two private keys
+	fmt.Println("We will need two private keys to set the EIP-7702 authorization:")
+	fmt.Println("")
+	fmt.Println("1. The private key of the address that will be authorized to use the contract.")
+	fmt.Println("   This is required to sign the authorization transaction.")
+	fmt.Println("")
+	fmt.Println("2. The private key of a separate address to pay for gas fees.")
+	fmt.Println("   This address will broadcast the transaction and pay for gas.")
+	fmt.Println("")
+	fmt.Printf("The authorization will allow the first address to execute code from: %s\n", templateAddress.Hex())
+	fmt.Println("")
+
+	// Get user private key
+	color.Yellow("Please enter the private key of the address to be authorized:")
+	userPrivateKeyHex, err := readPrivateKey()
 	if err != nil {
-		return fmt.Errorf("invalid victim private key: %w", err)
+		return fmt.Errorf("error reading user private key: %w", err)
+	}
+
+	userPrivateKey, err := crypto.HexToECDSA(strings.TrimPrefix(userPrivateKeyHex, "0x"))
+	if err != nil {
+		return fmt.Errorf("invalid user private key: %w", err)
 	}
 
 	// Get relayer private key
@@ -55,12 +60,13 @@ func Clear(rpcURL string, gasLimit uint64) error {
 		return fmt.Errorf("invalid relayer private key: %w", err)
 	}
 
-	// Get address from private key
-	victimAddress := crypto.PubkeyToAddress(victimPrivateKey.PublicKey)
+	// Get addresses from private keys
+	userAddress := crypto.PubkeyToAddress(userPrivateKey.PublicKey)
 	relayerAddress := crypto.PubkeyToAddress(relayerPrivateKey.PublicKey)
 
-	fmt.Printf("\nVictim address: %s\n", victimAddress.Hex())
-	fmt.Printf("Relayer address: %s\n", relayerAddress.Hex())
+	fmt.Printf("\nUser address (to be authorized): %s\n", userAddress.Hex())
+	fmt.Printf("Relayer address (pays gas): %s\n", relayerAddress.Hex())
+	fmt.Printf("Contract address (to authorize): %s\n", templateAddress.Hex())
 
 	// Get chain ID
 	chainID, err := getChainID(rpcURL)
@@ -70,9 +76,9 @@ func Clear(rpcURL string, gasLimit uint64) error {
 	fmt.Printf("\nChain ID: %d\n", chainID)
 
 	// Get nonces
-	victimNonce, err := getNonce(rpcURL, victimAddress.Hex())
+	userNonce, err := getNonce(rpcURL, userAddress.Hex())
 	if err != nil {
-		return fmt.Errorf("failed to get victim nonce: %w", err)
+		return fmt.Errorf("failed to get user nonce: %w", err)
 	}
 
 	relayerNonce, err := getNonce(rpcURL, relayerAddress.Hex())
@@ -80,7 +86,7 @@ func Clear(rpcURL string, gasLimit uint64) error {
 		return fmt.Errorf("failed to get relayer nonce: %w", err)
 	}
 
-	fmt.Printf("Victim nonce: %d\n", victimNonce)
+	fmt.Printf("User nonce: %d\n", userNonce)
 	fmt.Printf("Relayer nonce: %d\n", relayerNonce)
 
 	// Get gas parameters using EIP-1559 compatible method
@@ -118,7 +124,7 @@ func Clear(rpcURL string, gasLimit uint64) error {
 	fmt.Printf("Estimated max gas cost: %.9f ETH\n", totalGasEth)
 
 	// Confirm with user
-	fmt.Println("\nAre you sure you want to clear the EIP-7702 authorization for this address? (y/n)")
+	color.Yellow("\nAre you sure you want to set the EIP-7702 authorization for this address? (y/n)")
 	var confirmation string
 	fmt.Scanln(&confirmation)
 	if strings.ToLower(confirmation) != "y" && strings.ToLower(confirmation) != "yes" {
@@ -127,18 +133,18 @@ func Clear(rpcURL string, gasLimit uint64) error {
 
 	// Create EIP-7702 authorization request
 	req := SetAuthorizationRequest{
-		UserEOAPrivateKey:    victimPrivateKey,
-		UserEOANonce:         uint64(victimNonce),
+		UserEOAPrivateKey:    userPrivateKey,
+		UserEOANonce:         uint64(userNonce),
 		RelayerEOAPrivateKey: relayerPrivateKey,
 		RelayerNonce:         uint64(relayerNonce),
-		TemplateAddress:      common.Address{}, // Empty address to clear authorization
+		TemplateAddress:      templateAddress, // Set to specific contract address
 		ChainId:              chainID,
 		GasTip:               gasTip,
 		GasFeeCap:            gasFeeCap,
 		GasLimit:             gasLimit,
 	}
 
-	fmt.Println("\nGenerating EIP-7702 deauthorization transaction...")
+	fmt.Println("\nGenerating EIP-7702 authorization transaction...")
 	signedTx, err := GenerateSet7702AuthTx(req)
 	if err != nil {
 		return fmt.Errorf("failed to generate transaction: %w", err)
@@ -169,8 +175,8 @@ func Clear(rpcURL string, gasLimit uint64) error {
 		fmt.Print(".")
 	}
 
-	fmt.Println("\nTo verify the EIP-7702 authorization has been cleared, run:")
-	fmt.Printf("eip7702cleaner check %s --rpc-url %s\n", victimAddress.Hex(), rpcURL)
+	fmt.Println("\nTo verify the EIP-7702 authorization has been set, run:")
+	fmt.Printf("eip7702cleaner check %s --rpc-url %s\n", userAddress.Hex(), rpcURL)
 
 	return nil
 }

@@ -67,6 +67,30 @@ var (
 			}
 		},
 	}
+
+	// set 子命令
+	setCmd = &cobra.Command{
+		Use:   "set [contract_address]",
+		Short: "Set an EIP-7702 contract authorization to a specific address",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			contractAddress := args[0]
+
+			// 仅在debug模式下显示解析信息
+			if debug {
+				fmt.Printf("Debug - Cobra parsing - Contract Address: %s\n", contractAddress)
+				fmt.Printf("Debug - Cobra parsing - RPC URL: %s\n", rpcURL)
+				fmt.Printf("Debug - Cobra parsing - Debug: %v\n", debug)
+				fmt.Printf("Debug - Cobra parsing - Gas Limit: %d\n", gasLimit)
+			}
+
+			err := cmdpkg.Set(contractAddress, rpcURL, gasLimit)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+		},
+	}
 )
 
 func init() {
@@ -76,10 +100,14 @@ func init() {
 	clearCmd.Flags().StringVar(&rpcURL, "rpc-url", "", "RPC URL for Ethereum node")
 	clearCmd.Flags().BoolVar(&debug, "debug", false, "Enable debug output")
 
+	setCmd.Flags().StringVar(&rpcURL, "rpc-url", "", "RPC URL for Ethereum node")
+	setCmd.Flags().BoolVar(&debug, "debug", false, "Enable debug output")
+
 	rootCmd.PersistentFlags().Uint64Var(&gasLimit, "gas-limit", 100000, "Gas limit for transactions")
 
 	rootCmd.AddCommand(checkCmd)
 	rootCmd.AddCommand(clearCmd)
+	rootCmd.AddCommand(setCmd)
 }
 
 func main() {

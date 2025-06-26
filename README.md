@@ -87,6 +87,41 @@ This command removes an EIP-7702 authorization from an address. It will:
 **Why two private keys are needed:** 
 When an address has been maliciously authorized with EIP-7702, sending funds to the victim address might result in those funds being immediately stolen. Using a separate address to pay for gas allows for safe recovery without risking additional funds.
 
+#### Set an EIP-7702 contract authorization
+
+```bash
+eip7702cleaner set <contract_address> [--rpc-url <url>] [--gas-limit <limit>]
+```
+
+This command sets an EIP-7702 authorization to authorize a specific contract address. It will:
+
+1. Validate the provided contract address format
+
+2. Prompt you for two private keys:
+   - The private key of the address that will be authorized to use the contract
+   - The private key of a separate address to pay for gas fees
+
+3. Display transaction information including:
+   - User address (to be authorized), relayer address (pays gas), and contract address
+   - Chain ID and nonces
+   - Gas parameters and estimated costs
+
+4. Ask for confirmation before sending the transaction
+
+5. Broadcast the EIP-7702 authorization transaction and wait for it to be mined
+
+6. Provide a command to verify the authorization has been set
+
+**Use cases:**
+- Setting up legitimate EIP-7702 authorizations for smart contract interactions
+- Migrating from one contract to another by updating the authorization
+- Testing EIP-7702 functionality in development environments
+
+**Security considerations:**
+- Only authorize contracts you trust, as they will have full control over the authorized address
+- Always verify the contract address before confirming the transaction
+- Use a separate address to pay for gas fees to avoid complications
+
 ### Options
 
 - `--help`: Show help information
